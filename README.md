@@ -30,28 +30,48 @@ streamlit run app.py --server.address 127.0.0.1     # same app locally (needs .s
 python -m pytest                                      # engine + web API + browser tests
 python -m pytest --order-dir orders/X --source IMAGE  # verify one generated order
 ```
-`--display-fabric "Evenweave 28 over one"` prints the same verified chart for another fabric
-(the finished size then changes; the order size is never changed silently).
+`--display-fabric "Aida 14"` makes the engine use that fabric. The stitch grid is fitted to that fabric
+INSIDE the requested size (fabric and grid are chosen together). If the details cannot be kept on it, the
+result is SIZE-FIDELITY CONFLICT with alternatives. The requested size is never changed.
 
 ## Pipeline (threadora/)
 - `source.py` – SHA-256 of original bytes, EXIF orientation, PNG alpha → NO_STITCH (alpha ≥ 128 is stitched),
   conservative border flood-fill for opaque images, printed-chart detection (type B).
 - `sizing.py` – fabrics 11–22ct Aida, 25–40ct evenweave over one; integer grid that fits inside the request
-  with the aspect ratio kept. Fabrics above 28 stitches/inch are flagged not practical.
+  with the aspect ratio kept. Fabrics above 28 stitches/inch are flagged not practical. `physical_size()` is the
+  only finished-size formula (stitches ÷ stitches per inch); `size_problems()` enforces "never larger than
+  ordered, fills one side, aspect kept". The PDF file name carries the TRUE finished size (e.g. `_6.8x7.0in`).
 - `features.py` – lettering lines (detached alpha components grouped into lines, OCR via Tesseract),
   ornaments, small high-contrast blobs (eyes, highlights); fidelity gates vs the matrix preview:
   OCR on an actual-size simulation, letter parts and counters, mask IoU, blob contrast, SSIM, ΔE2000, edge F1.
 - `convert.py` – exact area integration (linear light), edge-aware and dominant-color variants,
   k-means in Lab snapped to DMC (CIEDE2000, chroma tie-break), near-duplicate thread merge, confetti cleanup.
-- `engine.py` – simplest fabric whose grid passes every gate, then fewest colors within quality tolerance.
+- `fidelity.py` – design audit of the matrix against the original, cell by cell: extra stitches, missing
+  stitches, accidental holes vs intentional negative space (transparent areas, letter counters), filled source
+  gaps, stitched islands without source, color bleeding at hard edges, unsupported confetti, uneven flat areas.
+  Source-backed repair only: bleeding cells take a thread their own source pixels show; 1–2 cell pinholes in
+  painted areas are filled; isolated specks change only if the neighbour thread fits the source cell as well.
+- `engine.py` – for each fabric its own grid inside the requested size; area / edge-aware / dominant candidates
+  are compared; simplest fabric whose grid passes every gate, then fewest colors within quality tolerance,
+  preferring candidates with no review findings.
 - `pdf.py` – cover, materials+size table, legend with exact counts, matrix overview, charts with
   global labels, bold 10×10 lines, 2-cell ghost overlaps (grey, never counted), mini-map navigation.
 - Fonts: DejaVu bundled in `threadora/data/fonts` (free license) so PDFs match on every OS.
-- `qa.py` + `tests/` – rebuilds the matrix from the PDF text layer and asserts equality, page/label/font/
-  clipping/legibility checks.
+- `qa.py` + `tests/` – rebuilds the matrix from the PDF text layer and asserts equality (overlap reference
+  cells checked separately: outside their tile, in the 2-cell band, identical to the master), renders every chart
+  cell and compares its color with the master, cover/file-name size truth, tile ownership, page/label/font/
+  clipping/legibility checks, independent recomputation of the design audit.
+- `tests/test_fidelity.py` – injects each defect class (extra cross, missing stitch, hole, bleeding, wrong size,
+  duplicated tile cells, wrong DMC, shifted page, PDF print defects) and asserts it is caught.
+- `tests/test_regression_engine.py` (`-m real_engine`, slow) – real engine on 10 synthetic design types
+  (`tests/designs.py`) and every preset size + custom sizes, full order tests on every PDF.
 
-Status lines: `THREADORA VERIFIED — COMPLETE` only when tests pass, gates pass, size kept and the fabric is
-practical; otherwise `THREADORA SIZE-FIDELITY CONFLICT` or `THREADORA TECHNICAL FAILURE` with the blocker.
+Status lines (`pipeline.decide_status`):
+- `THREADORA VERIFIED — COMPLETE` – tests pass, gates pass, size kept, practical fabric, no open review point.
+- `THREADORA REVIEW_NOT_VERIFIED` – technically correct, but automated confidence is not sufficient (e.g. script
+  name not readable by OCR, possible bleeding, light details touching a removed background). Reasons listed.
+- `THREADORA SIZE-FIDELITY CONFLICT` – details cannot be kept at this size on a practical fabric.
+- `THREADORA TECHNICAL FAILURE` – a test or size invariant failed.
 
 ## Known limits
 - Type B (existing chart) sources are detected and stopped: no legend-free symbol→DMC guessing.

@@ -19,9 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-VERIFIED = "THREADORA VERIFIED — COMPLETE"
-CONFLICT = "THREADORA SIZE-FIDELITY CONFLICT"
-FAILURE = "THREADORA TECHNICAL FAILURE"
+from threadora.pipeline import CONFLICT, FAILURE, REVIEW, VERIFIED  # noqa: F401  (single definition)
 
 STATES = ("queued", "running", "done", "interrupted")
 LOG_KEEP = 400
@@ -74,7 +72,8 @@ def summarize(audit: dict, order_dir: Path) -> dict:
     """Customer-facing summary built from the engine's audit and the locked master matrix."""
     out = {k: audit.get(k) for k in ("status", "blocker", "pdf_pages", "dmc_colors", "display_fabric",
                                      "chart_resolution_fabric", "fabric_practical", "within_request",
-                                     "alternatives_same_chart", "tests", "seconds")}
+                                     "alternatives_same_chart", "tests", "seconds",
+                                     "review_reasons", "size_problems")}
     pdf = audit.get("pdf")
     out["pdf_name"] = Path(pdf).name if pdf and Path(pdf).exists() else None
     out["pdf_mb"] = round(audit["pdf_bytes"] / 1e6, 2) if audit.get("pdf_bytes") else None

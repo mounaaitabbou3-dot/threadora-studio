@@ -116,7 +116,7 @@ def test_streamlit_login_upload_generate_download(streamlit_server, tmp_path):
         with page.expect_download() as dl:
             page.get_by_role("button", name="Download PDF").click()
         data = Path(dl.value.path()).read_bytes()
-        assert data[:5] == b"%PDF-" and dl.value.suggested_filename == "THREADORA_LOVE_3x3in.pdf"
+        assert data[:5] == b"%PDF-" and dl.value.suggested_filename == "THREADORA_LOVE_2.6x3.0in.pdf"  # true finished size
         with page.expect_download() as dl2:
             page.get_by_role("button", name="Download private audit files (ZIP)").click()
         import zipfile

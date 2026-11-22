@@ -3,6 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const VERIFIED = "THREADORA VERIFIED — COMPLETE";
 const CONFLICT = "THREADORA SIZE-FIDELITY CONFLICT";
+const REVIEW = "THREADORA REVIEW_NOT_VERIFIED";
 let token = "";
 try { token = localStorage.getItem("threadora_token") || ""; } catch (e) { /* storage blocked */ }
 let options = null;
@@ -28,7 +29,7 @@ async function api(path, init = {}) {
 }
 
 function statusClass(status) {
-  return status === VERIFIED ? "ok" : status === CONFLICT ? "warn" : "bad";
+  return status === VERIFIED ? "ok" : (status === CONFLICT || status === REVIEW) ? "warn" : "bad";
 }
 function fmt(n, d = 2) { return Number(n).toFixed(d).replace(/\.?0+$/, ""); }
 function esc(s) {

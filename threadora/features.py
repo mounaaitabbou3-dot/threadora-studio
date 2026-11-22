@@ -66,7 +66,7 @@ def source_holes(mask: np.ndarray, bh: int) -> list[np.ndarray]:
 
 
 def _norm_tokens(s: str) -> list[str]:
-    return [t for t in re.split(r"[^0-9A-Za-z]+", s) if t]
+    return [t.lower() for t in re.split(r"[^0-9A-Za-z]+", s) if t]
 
 
 def ocr_line(img_rgb: np.ndarray) -> str:
