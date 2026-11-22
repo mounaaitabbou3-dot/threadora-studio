@@ -1,4 +1,4 @@
-# THREADORA V10 — universal cross-stitch engine (private)
+# THREADORA V13 — universal cross-stitch engine (private)
 
 One image + requested width × height → one A4 color+symbol PDF, plus private audit files.
 
@@ -63,8 +63,25 @@ result is SIZE-FIDELITY CONFLICT with alternatives. The requested size is never 
   clipping/legibility checks, independent recomputation of the design audit.
 - `tests/test_fidelity.py` – injects each defect class (extra cross, missing stitch, hole, bleeding, wrong size,
   duplicated tile cells, wrong DMC, shifted page, PDF print defects) and asserts it is caught.
-- `tests/test_regression_engine.py` (`-m real_engine`, slow) – real engine on 10 synthetic design types
+- `tests/test_regression_engine.py` (`-m real_engine`, slow) – real engine on 11 synthetic design types
   (`tests/designs.py`) and every preset size + custom sizes, full order tests on every PDF.
+
+V13 additions:
+- White stitch vs NO_STITCH: near-white source artwork left unstitched is a hard failure (white is never dropped
+  because it matches the fabric); white source cells on a dark thread are flagged. Opaque backgrounds are removed
+  edge-aware, so a white shape outlined on white paper stays stitched.
+- Broken outlines: line-like source shapes that fall apart in the chart are re-joined along their own skeleton
+  where the source paints the line on ≥25 % of the cell; remaining stitchable breaks block VERIFIED. Breaks in
+  lines thinner than a quarter stitch are counted (`sub_stitch_outline_breaks`) but cannot be full crosses.
+- Near-duplicate DMC threads (CIEDE2000 < 5) are merged in the palette and flagged in the audit.
+- PDF: automatic title (personalization → OCR'd lettering → meaningful file name → "Cross Stitch Design", never
+  "Pattern"); clean stitched-result page; separate chart-navigation page; floss in meters and skeins calculated per
+  color from stitch count, fabric count and strands.
+- Size A/B: the cover and the app show A = exact stitched design size and B = the maximum box requested.
+- `report.py`: five-gate quality report (technical, physical size, design fidelity, DMC/matrix consistency,
+  print readability) built from measured values and the tests that actually ran; shown before download,
+  saved as `private/quality_report.{json,md}`. No overall numeric score.
+- `tools/benchmark.py`: runs the engine on every synthetic design (+ real images) and writes a comparison table.
 
 Status lines (`pipeline.decide_status`):
 - `THREADORA VERIFIED — COMPLETE` – tests pass, gates pass, size kept, practical fabric, no open review point.

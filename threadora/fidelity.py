@@ -361,6 +361,90 @@ def _mask_self(m, r, c):
     return out
 
 
+GAP_CLEAR = 0.6         # enclosed source gap clearly see-through in a cell
+CONTOUR_SHARE = 0.4     # a cell belongs to a thread's source shape if >= 40% of it is that thread
+CONTOUR_MIN = 8         # only shapes of >= 8 cells are checked for continuity
+CONTOUR_THIN = 3.0        # mean thickness (cells) at or below which a shape is a contour/line
+CONTOUR_TEXTURE = 0.3     # > this share of mixed cells around a stroke = texture, not an outline
+CONTOUR_GAP_SHARE = 0.5   # a gap counts when the line's thread is the cell's majority color
+NEAR_DUP_DE = 5.0       # two palette threads closer than this are near-duplicates
+
+
+def _close_to(matrix: np.ndarray, k: int, pd: np.ndarray, de: float = 8.0) -> np.ndarray:
+    st = matrix >= 0
+    return st & (pd[k][np.where(st, matrix, 0)] < de)
+
+
+def thin_shapes(cs: "CellSource"):
+    """Line-like source shapes per thread (outlines, stems, strokes): (k, shape mask, skeleton)."""
+    from skimage.morphology import skeletonize
+    out = []
+    share = cs.votes / np.maximum(cs.cov, 1e-9)[..., None]
+    for k in range(share.shape[-1]):
+        sk = (share[..., k] >= CONTOUR_SHARE) & (cs.cov > 0)
+        n, lab, stats, _ = cv2.connectedComponentsWithStats(sk.astype(np.uint8), connectivity=8)
+        for i in range(1, n):
+            if stats[i, cv2.CC_STAT_AREA] < CONTOUR_MIN:
+                continue
+            comp = lab == i
+            skel = skeletonize(comp)
+            if skel.sum() == 0 or comp.sum() / skel.sum() > CONTOUR_THIN:
+                continue
+            out.append((k, comp, skel))
+    return out
+
+
+def broken_contours(matrix: np.ndarray, cs: "CellSource", protect=None):
+    """Source line shapes (drawn outlines, stems, strokes) that fall apart into several pieces
+    in the chart. Strokes inside textured areas (stitched-look photos, painted shading) are
+    skipped: there every cell mixes several threads and a 'line' is texture, not an outline."""
+    pd = ciede2000_matrix(cs.pal_lab, cs.pal_lab)
+    share = cs.votes / np.maximum(cs.cov, 1e-9)[..., None]
+    mixed = (share.max(-1) < 0.6) & (cs.cov >= 0.5)
+    painted = cs.cov >= 0.5
+    broken = []
+    for k, comp, skel in thin_shapes(cs):
+        if protect is not None and (comp & protect).any():
+            continue
+        around = (cv2.dilate(comp.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0) & painted
+        if around.any() and mixed[around].mean() > CONTOUR_TEXTURE:
+            continue
+        near = cv2.dilate(comp.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        mk = _close_to(matrix, k, pd) & near
+        n, lab, stats, _ = cv2.connectedComponentsWithStats(mk.astype(np.uint8), connectivity=8)
+        pieces = sum(1 for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= 2)
+        if pieces > 1:
+            gaps = skel & ~mk
+            broken.append((k, comp, skel, pieces, gaps))
+    return broken
+
+
+def repair_contours(matrix: np.ndarray, cs: "CellSource", protect=None) -> tuple[np.ndarray, int]:
+    """Re-join broken source lines along their own skeleton, only in stitched cells where the
+    source shows that thread on at least 25% of the cell."""
+    m = matrix.copy()
+    share = cs.votes / np.maximum(cs.cov, 1e-9)[..., None]
+    pd = ciede2000_matrix(cs.pal_lab, cs.pal_lab)
+    fixed = 0
+    for k, comp, skel, _pieces, _gaps in broken_contours(m, cs, protect):
+        todo = skel & (m >= 0) & ~_close_to(m, k, pd) & (share[..., k] >= CONTOUR_SHARE)
+        m[todo] = k
+        fixed += int(todo.sum())
+    return m, fixed
+
+
+def white_cells(cs: "CellSource") -> np.ndarray:
+    """Cells whose source is opaque near-white artwork (L* >= 88, chroma <= 12)."""
+    L, a, b = cs.mean_lab[..., 0], cs.mean_lab[..., 1], cs.mean_lab[..., 2]
+    return (cs.cov >= 0.5) & (L >= 88) & (np.hypot(a, b) <= 12)
+
+
+def near_duplicate_threads(pal_lab: np.ndarray) -> list[tuple[int, int, float]]:
+    pd = ciede2000_matrix(pal_lab, pal_lab)
+    return [(i, j, round(float(pd[i, j]), 2)) for i in range(len(pal_lab))
+            for j in range(i + 1, len(pal_lab)) if pd[i, j] < NEAR_DUP_DE]
+
+
 def audit(matrix: np.ndarray, cs: CellSource, protect_open: np.ndarray | None = None,
           protect: np.ndarray | None = None) -> dict:
     """Compare the matrix with the source. Returns counts, coordinates (first 50 of each,
@@ -384,7 +468,11 @@ def audit(matrix: np.ndarray, cs: CellSource, protect_open: np.ndarray | None = 
     # source gaps of >= 1 stitch that the chart filled in completely
     src_gap = cs.hole_cov >= 0.5
     n, lab = cv2.connectedComponents(src_gap.astype(np.uint8), connectivity=4)
-    lost_gaps = [i for i in range(1, n) if st[lab == i].all()]
+    # a gap counts when it is clearly see-through: one cell at least 60% gap, or 1.5 stitches of gap
+    # in total. Cells 50-58% gap are borderline and follow the coverage rule (regression: Cecilia 9x9
+    # reported "13 enclosed gaps filled" that were all single half-covered cells).
+    lost_gaps = [i for i in range(1, n) if st[lab == i].all()
+                 and (cs.hole_cov[lab == i].max() >= GAP_CLEAR or cs.hole_cov[lab == i].sum() >= 1.5)]
     # spurious stitched islands: no source paint at all under them
     n2, lab2, stats2, _ = cv2.connectedComponentsWithStats(st.astype(np.uint8), connectivity=8)
     spurious = [i for i in range(1, n2) if cs.cov[lab2 == i].max() < EXTRA_COV]
@@ -420,8 +508,32 @@ def audit(matrix: np.ndarray, cs: CellSource, protect_open: np.ndarray | None = 
     def coords(mask):
         return [[int(r) + 1, int(c) + 1] for r, c in zip(*np.where(mask))][:50]
 
+    # A break only counts where the chart could have stitched the line (see below). Breaks in
+    # lines thinner than the stitch are reported (sub_stitch_outline_breaks), not flagged.
+    share = cs.votes / np.maximum(cs.cov, 1e-9)[..., None]
+    brk, thin_breaks = [], 0
+    brk_mask = np.zeros(matrix.shape, bool)
+    for item in broken_contours(matrix, cs, protect):
+        k, gaps = item[0], item[4]
+        # stitchable gap: the cell is mostly painted and the line's thread is its majority color.
+        # Edge cells that are mostly transparent stay NO_STITCH; mixed cells may take the other color.
+        supported = gaps & (share[..., k] >= CONTOUR_GAP_SHARE) & (cs.cov >= 0.5)
+        if supported.any():
+            brk.append(item)
+            brk_mask |= supported
+        else:
+            thin_breaks += 1
+    wc = white_cells(cs)
+    lost_white = wc & ~st & ~po
+    white_wrong = wc & st & (cs.pal_lab[np.where(st, matrix, 0)][..., 0] < 70)
+    dups = near_duplicate_threads(cs.pal_lab)
     res = {
         "stitched_cells": int(st.sum()),
+        "broken_contours": len(brk), "broken_contours_at": coords(brk_mask),
+        "sub_stitch_outline_breaks": thin_breaks,
+        "white_source_cells": int(wc.sum()), "lost_white_cells": int(lost_white.sum()),
+        "lost_white_at": coords(lost_white), "white_cells_dark_thread": int(white_wrong.sum()),
+        "near_duplicate_threads": len(dups), "near_duplicate_pairs": dups,
         "extra_stitches": int(extra.sum()), "extra_at": coords(extra),
         "missing_stitches": int(missing.sum()), "missing_at": coords(missing),
         "accidental_holes": len(acc_holes), "accidental_hole_cells": int(acc_mask.sum()),
@@ -443,7 +555,16 @@ def audit(matrix: np.ndarray, cs: CellSource, protect_open: np.ndarray | None = 
         hard.append(f"{res['missing_stitches']} design cells left unstitched")
     if res["spurious_components"]:
         hard.append(f"{res['spurious_components']} stitched islands with no source paint")
+    if res["lost_white_cells"]:
+        hard.append(f"{res['lost_white_cells']} white artwork cells left unstitched")
     review = []
+    if res["broken_contours"]:
+        review.append(f"{res['broken_contours']} outline/line shape(s) of the source are broken into pieces")
+    if res["white_cells_dark_thread"]:
+        review.append(f"{res['white_cells_dark_thread']} white source cells use a dark thread")
+    if res["near_duplicate_threads"]:
+        review.append(f"{res['near_duplicate_threads']} pair(s) of DMC threads are nearly identical "
+                      f"(CIEDE2000 < {NEAR_DUP_DE:g})")
     if res["accidental_holes"]:
         review.append(f"{res['accidental_holes']} enclosed gap(s) in the chart that the source does not have")
     if res["source_gaps_filled"]:
@@ -469,7 +590,7 @@ def defect_overlay(matrix: np.ndarray, pal_rgb: np.ndarray, result: dict, scale:
     (red = extra/missing, orange = accidental hole, magenta = bleeding, blue = confetti)."""
     from .convert import render_matrix
     img = render_matrix(matrix, pal_rgb, scale=scale).copy()
-    colors = {"extra_at": (230, 0, 0), "missing_at": (230, 0, 0), "accidental_holes_at": (255, 140, 0),
+    colors = {"broken_contours_at": (255, 200, 0), "lost_white_at": (230, 0, 0), "extra_at": (230, 0, 0), "missing_at": (230, 0, 0), "accidental_holes_at": (255, 140, 0),
               "color_bleed_at": (220, 0, 220), "unsupported_confetti_at": (0, 90, 255),
               "lost_details_at": (0, 170, 0)}
     for key, col in colors.items():

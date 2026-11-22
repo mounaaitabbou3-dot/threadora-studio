@@ -83,7 +83,7 @@ def _assign(cell_lab: np.ndarray, pal_lab: np.ndarray):
 
 def build_palette(fields: CellFields, stitch: np.ndarray, k: int, weights: np.ndarray,
                   forced_dmc: list[int] | None = None,
-                  merge_de: float = 4.0, seed: int = 7) -> PaletteResult:
+                  merge_de: float = 5.0, seed: int = 7) -> PaletteResult:
     """k-means in Lab (critical cells weighted), centroids snapped to real DMC
     colors by CIEDE2000, refined, near-duplicate threads merged."""
     dlab = dmc_lab()

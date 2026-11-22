@@ -154,6 +154,12 @@ function showResult(j) {
   st.className = "status " + statusClass(r.status);
   $("blocker").textContent = r.blocker || (r.verified ? "All automated tests and detail checks passed." : "");
 
+  const q = r.quality_report;
+  $("quality").innerHTML = q ? `<h3>${esc(r.title || "")}</h3><h3>Quality report</h3>
+    <p class="hint">${q.tests_executed} automated tests ran on this order, ${q.tests_passed} passed. No overall score is given: each gate shows its own measurements.</p>
+    <ul>${Object.values(q.gates).map((g) => `<li><b>${esc(g.label)}: ${esc(g.result)}</b>${
+      g.risks.length ? "<br>" + g.risks.map(esc).join("<br>") : ""}</li>`).join("")}</ul>` : "";
+
   const dl = $("dl");
   if (r.pdf_name) {
     dl.hidden = false;
@@ -167,8 +173,8 @@ function showResult(j) {
 
   const stats = [];
   const req = j.request;
-  stats.push(["Requested", req.size === "custom" ? `${fmt(req.width)} × ${fmt(req.height)} ${req.units}` : `${req.width} × ${req.height} in`]);
-  if (r.finished_in) stats.push(["Finished size", `${fmt(r.finished_in[0])} × ${fmt(r.finished_in[1])} in (${fmt(r.finished_cm[0], 1)} × ${fmt(r.finished_cm[1], 1)} cm)`]);
+  stats.push(["B · Maximum box requested", req.size === "custom" ? `${fmt(req.width)} × ${fmt(req.height)} ${req.units}` : `${req.width} × ${req.height} in`]);
+  if (r.finished_in) stats.push(["A · Stitched design (exact)", `${fmt(r.finished_in[0])} × ${fmt(r.finished_in[1])} in (${fmt(r.finished_cm[0], 1)} × ${fmt(r.finished_cm[1], 1)} cm)`]);
   if (r.stitches) stats.push(["Stitch grid", `${r.stitches.cols} × ${r.stitches.rows} (${r.stitches.total.toLocaleString("en-US")} stitches)`]);
   if (r.fabric) stats.push(["Fabric", r.fabric + (r.fabric_practical === false ? " (expert only)" : "")]);
   if (r.dmc_colors != null) stats.push(["DMC colors", r.dmc_colors]);
@@ -192,7 +198,7 @@ function showResult(j) {
     const lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]);
     return `<tr><td><span class="swatch" style="background:${esc(p.hex)};color:${lum > 140 ? "#000" : "#fff"}">${esc(p.symbol)}</span></td>
       <td>${esc(p.symbol)}</td><td>${esc(p.code)}</td><td>${esc(p.name)}</td>
-      <td class="n">${p.count.toLocaleString("en-US")}</td><td class="n">${p.skeins}</td></tr>`;
+      <td class="n">${p.count.toLocaleString("en-US")}</td><td class="n">${p.meters ?? ""}</td><td class="n">${p.skeins}</td></tr>`;
   }).join("");
   $("legend").closest(".table-wrap").previousElementSibling.hidden = !(r.palette || []).length;
   $("log2").textContent = (j.log || []).join("\n");
