@@ -18,10 +18,12 @@ def main(argv=None):
     ap.add_argument("--display-fabric", default=None,
                     help="use this fabric (grid fitted to it inside the requested size; size never changes)")
     ap.add_argument("--no-tests", action="store_true")
+    ap.add_argument("--review-copy", action="store_true",
+                    help="on a size-fidelity conflict, still build the best PDF marked REVIEW COPY - NOT VERIFIED")
     a = ap.parse_args(argv)
     res = run_order(a.image, a.width, a.height, a.units,
                     {"phrase": a.phrase, "name": a.name, "year": a.year}, a.out,
-                    display_fabric=a.display_fabric, run_tests=not a.no_tests)
+                    display_fabric=a.display_fabric, run_tests=not a.no_tests, review_copy=a.review_copy)
     print(json.dumps({k: res.get(k) for k in ("status", "blocker", "pdf", "pdf_pages", "dmc_colors",
                                                "finished_in", "display_fabric", "review_reasons", "tests")}, indent=2, default=str))
 

@@ -130,6 +130,10 @@ class PatternPDF:
         c.drawString(MARGIN, PAGE_H - 26, "THREADORA CROSS STITCH")
         c.setFont("TD-Sans", 8.5)
         c.drawRightString(PAGE_W - MARGIN, PAGE_H - 26, self.meta["project_name"])
+        if self.meta.get("review_banner"):
+            c.setFillColor(Color(1, 0.85, 0.2))
+            c.setFont("TD-Bold", 8.5)
+            c.drawCentredString(PAGE_W / 2 + 20, PAGE_H - 26, self.meta["review_banner"])
         c.setFillColor(black)
         c.setFont("TD-Bold", 12)
         c.drawString(MARGIN, PAGE_H - 50, title)

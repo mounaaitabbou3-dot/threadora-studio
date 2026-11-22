@@ -186,7 +186,19 @@ def test_physical_size_labels_truthful(pdf_path, master):
     assert f"{w:.2f} × {h:.2f} in" in cover, "cover does not state the true finished size"
     assert f"{master['cols']} wide × {master['rows']} high" in cover
     assert fab.label in cover
-    assert pdf_path.name.endswith(f"_{size_label(w, h)}.pdf"), pdf_path.name
+    assert (pdf_path.name.endswith(f"_{size_label(w, h)}.pdf")
+            or pdf_path.name.endswith(f"_{size_label(w, h)}_REVIEW_COPY.pdf")), pdf_path.name
+
+
+def test_review_copy_is_marked_on_every_page(pdf_path):
+    """A conflict review copy must say NOT VERIFIED on every page; a normal PDF must not."""
+    import pymupdf
+    doc = pymupdf.open(pdf_path)
+    marked = [("REVIEW COPY" in p.get_text()) for p in doc]
+    if pdf_path.name.endswith("_REVIEW_COPY.pdf"):
+        assert all(marked)
+    else:
+        assert not any(marked)
 
 
 def test_size_table_marks_exactly_the_chosen_fabric(pdf_path, master):
