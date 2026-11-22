@@ -1,0 +1,3 @@
+threadora/data/*.csv -text
+*.ttf binary
+*.bat text eol=crlf

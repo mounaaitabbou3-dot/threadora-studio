@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>THREADORA Studio</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark" aria-hidden="true">✕</span> THREADORA <small>cross-stitch studio · private</small></div>
+  <div id="health" class="health" aria-live="polite">Checking engine…</div>
+</header>
+
+<main>
+  <section class="card" id="order-card">
+    <h1>New pattern</h1>
+    <p class="lead">Upload the original artwork, choose the finished size, and the engine picks the fabric,
+      DMC colors and symbols, then builds and tests one color + symbol PDF.</p>
+
+    <form id="order-form" novalidate>
+      <div class="step">
+        <h2><span class="num">1</span> Original image</h2>
+        <label class="drop" id="drop">
+          <input type="file" id="image" name="image" accept="image/png,image/jpeg,image/webp" required>
+          <img id="thumb" alt="" hidden>
+          <span id="drop-text">Drop a PNG, JPG or WEBP here, or <u>choose a file</u>.<br>
+            <small>Transparent PNG areas stay unstitched. The file is kept exactly as uploaded.</small></span>
+        </label>
+      </div>
+
+      <div class="step">
+        <h2><span class="num">2</span> Finished size</h2>
+        <div class="chips" id="sizes" role="radiogroup" aria-label="Finished size"></div>
+        <div id="custom" class="custom" hidden>
+          <label>Width <input type="number" id="width" min="0.5" step="0.1" value="6"></label>
+          <span class="x">×</span>
+          <label>Height <input type="number" id="height" min="0.5" step="0.1" value="8"></label>
+          <label>Units
+            <select id="units"><option value="in">inches</option><option value="cm">cm</option></select>
+          </label>
+        </div>
+        <p class="hint" id="size-hint"></p>
+      </div>
+
+      <details class="step">
+        <summary><h2><span class="num">3</span> Personalization <small>(optional)</small></h2></summary>
+        <p class="hint">Type the text exactly as it already appears in the artwork. The engine uses it to find the
+          lettering and to check it stays readable when stitched. It does not rewrite text in the artwork.</p>
+        <div class="grid3">
+          <label>Phrase <input id="phrase" maxlength="120" placeholder="In Loving Memory"></label>
+          <label>Name <input id="name" maxlength="60" placeholder="Cecilia"></label>
+          <label>Year / date <input id="year" maxlength="20" placeholder="2026"></label>
+        </div>
+      </details>
+
+      <details class="step">
+        <summary><h2><span class="num">4</span> Fabric <small>(automatic)</small></h2></summary>
+        <p class="hint">Leave on automatic. Choose a fabric only to print an already verified chart for a different
+          fabric. The finished size then changes and the app says so.</p>
+        <select id="fabric"><option value="">Automatic (recommended)</option></select>
+      </details>
+
+      <div class="actions">
+        <button type="submit" id="go" class="primary">Generate PDF</button>
+        <span id="form-error" class="error" role="alert"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="card" id="progress-card" hidden>
+    <h2 id="progress-title">Working…</h2>
+    <div class="bar"><div></div></div>
+    <p class="hint">Large or detailed designs take a few minutes: every fabric is tried, lettering is checked,
+      the PDF is built and then tested page by page.</p>
+    <details><summary>Engine log</summary><pre id="log"></pre></details>
+  </section>
+
+  <section class="card" id="result-card" hidden>
+    <div id="status" class="status"></div>
+    <p id="blocker" class="blocker"></p>
+    <div class="downloads">
+      <a id="dl" class="primary button" href="#" download>Download PDF</a>
+      <span id="dl-note" class="hint"></span>
+    </div>
+    <dl class="stats" id="stats"></dl>
+    <div class="previews">
+      <figure><img id="src-img" alt="Original artwork"><figcaption>Original (reference)</figcaption></figure>
+      <figure><img id="prev-img" alt="Stitched result rebuilt from the master matrix">
+        <figcaption>STITCHED RESULT · rebuilt from the master stitch matrix</figcaption></figure>
+    </div>
+    <div id="alts"></div>
+    <h3>DMC legend</h3>
+    <div class="table-wrap"><table id="legend"><thead><tr><th>Color</th><th>Symbol</th><th>DMC</th><th>Name</th>
+      <th class="n">Stitches</th><th class="n">Skeins</th></tr></thead><tbody></tbody></table></div>
+    <details><summary>Engine log</summary><pre id="log2"></pre></details>
+    <button type="button" id="again" class="secondary">Start another pattern</button>
+  </section>
+
+  <section class="card" id="history-card">
+    <h2>Recent orders</h2>
+    <ul id="history"><li class="hint">None yet.</li></ul>
+  </section>
+</main>
+<footer>Runs entirely on this computer. No AI or online service is used to make patterns.
+  DMC colors on screen are approximations.</footer>
+<script src="app.js"></script>
+</body>
+</html>
