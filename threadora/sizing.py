@@ -106,14 +106,60 @@ def fit_grid(src_w: int, src_h: int, req_w_in: float, req_h_in: float, fabric: F
     return GridPlan(fabric, cols, rows, req_w_in, req_h_in)
 
 
-def size_table(cols: int, rows: int) -> list[dict]:
-    """Finished size of the same chart on other fabrics."""
+SIZE_TOL_IN = 1e-6
+
+
+def physical_size(cols: int, rows: int, fabric: Fabric) -> tuple[float, float]:
+    """The ONLY formula for finished size: stitches / stitches per inch."""
+    spi = fabric.stitches_per_inch
+    return cols / spi, rows / spi
+
+
+def size_problems(cols: int, rows: int, fabric: Fabric, req_w_in: float, req_h_in: float,
+                  src_w: int | None = None, src_h: int | None = None) -> list[str]:
+    """Invariants every delivered chart must meet. Empty list = size is correct.
+    - finished size never exceeds the requested box,
+    - the design fills the box on at least one side (within one stitch),
+    - aspect ratio of the source kept within one stitch of rounding."""
+    out = []
+    w, h = physical_size(cols, rows, fabric)
+    spi = fabric.stitches_per_inch
+    if w > req_w_in + SIZE_TOL_IN or h > req_h_in + SIZE_TOL_IN:
+        out.append(f"finished size {w:.2f} x {h:.2f} in is larger than the requested "
+                   f"{req_w_in:g} x {req_h_in:g} in")
+    if w < req_w_in - 1 / spi - SIZE_TOL_IN and h < req_h_in - 1 / spi - SIZE_TOL_IN:
+        out.append(f"finished size {w:.2f} x {h:.2f} in does not fill the requested "
+                   f"{req_w_in:g} x {req_h_in:g} in on either side")
+    if src_w and src_h and abs(cols / rows - src_w / src_h) > 1.0 / min(cols, rows) + 1e-9:
+        out.append(f"aspect ratio changed: grid {cols}x{rows} vs source {src_w}x{src_h}")
+    return out
+
+
+def size_label(w_in: float, h_in: float) -> str:
+    """Filename-safe finished size, e.g. 6.8x7.0in."""
+    return f"{w_in:.1f}x{h_in:.1f}in"
+
+
+SIZE_TABLE_FABRICS = (("11-count Aida", 11, "Aida", 1), ("14-count Aida", 14, "Aida", 1),
+                      ("16-count Aida", 16, "Aida", 1), ("18-count Aida", 18, "Aida", 1),
+                      ("20-count Aida", 20, "Aida", 1), ("22-count Aida", 22, "Aida", 1),
+                      ("28-count evenweave over two", 28, "Evenweave", 2),
+                      ("32-count linen over two", 32, "Evenweave", 2),
+                      ("25-count evenweave over one", 25, "Evenweave", 1),
+                      ("28-count evenweave over one", 28, "Evenweave", 1),
+                      ("32-count linen over one", 32, "Evenweave", 1),
+                      ("36-count linen over one", 36, "Evenweave", 1),
+                      ("40-count linen over one", 40, "Evenweave", 1))
+
+
+def size_table(cols: int, rows: int, chosen: Fabric | None = None) -> list[dict]:
+    """Finished size of the same chart on other fabrics. Exactly one row is marked
+    chosen when `chosen` is given (every FABRICS entry has a row)."""
     rows_out = []
-    for name, spi in (("11-count Aida", 11), ("14-count Aida", 14), ("16-count Aida", 16),
-                      ("18-count Aida", 18), ("20-count Aida", 20), ("22-count Aida", 22),
-                      ("28-count evenweave over two", 14), ("32-count linen over two", 16),
-                      ("25-count evenweave over one", 25), ("28-count evenweave over one", 28),
-                      ("32-count linen over one", 32)):
+    for name, count, kind, over in SIZE_TABLE_FABRICS:
+        spi = count / over
         rows_out.append({"fabric": name, "w_in": cols / spi, "h_in": rows / spi,
-                         "w_cm": cols / spi * CM_PER_IN, "h_cm": rows / spi * CM_PER_IN})
+                         "w_cm": cols / spi * CM_PER_IN, "h_cm": rows / spi * CM_PER_IN,
+                         "chosen": bool(chosen and chosen.count == count and chosen.kind == kind
+                                        and chosen.over == over)})
     return rows_out

@@ -9,7 +9,7 @@ import fitz
 import pytest
 from fastapi.testclient import TestClient
 
-from webapp.jobs import CONFLICT, FAILURE, VERIFIED, JobStore
+from webapp.jobs import CONFLICT, FAILURE, REVIEW, VERIFIED, JobStore
 from webapp.server import create_app
 
 from .sample import sample_png
@@ -188,7 +188,7 @@ def test_real_engine_end_to_end(tmp_path):
         r = post(c, {"size": "3", "name": "LOVE"}, content=sample_png())
         j = wait_done(c, r.json()["id"])
         res = j["result"]
-        assert res["status"] in (VERIFIED, CONFLICT, FAILURE)
+        assert res["status"] in (VERIFIED, REVIEW, CONFLICT, FAILURE)
         assert res["status"] == VERIFIED, res
         assert res["tests"]["returncode"] == 0
         assert res["finished_in"][0] <= 3 + 1e-6 and res["finished_in"][1] <= 3 + 1e-6

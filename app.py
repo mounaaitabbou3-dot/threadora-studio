@@ -31,7 +31,7 @@ from threadora.dmc import DATA_SHA256, dataset_sha256
 from threadora.features import ocr_status
 from threadora.pipeline import run_order
 from threadora.sizing import CM_PER_IN, FABRICS
-from webapp.jobs import CONFLICT, FAILURE, VERIFIED, safe_filename, summarize
+from webapp.jobs import CONFLICT, FAILURE, REVIEW, VERIFIED, safe_filename, summarize
 
 PRESETS_IN = (3, 5, 7, 9, 12, 16, 20)
 MIN_IN, MAX_IN = 1.0, 60.0
@@ -172,9 +172,13 @@ def generate(raw: bytes, filename: str, w: float, h: float, units: str, pers: di
 
 def show_result(res: dict, raw: bytes) -> None:
     status = res.get("status") or FAILURE
-    cls = "td-ok" if status == VERIFIED else "td-warn" if status == CONFLICT else "td-bad"
+    cls = "td-ok" if status == VERIFIED else "td-warn" if status in (CONFLICT, REVIEW) else "td-bad"
     st.markdown(f'<div class="td-status {cls}" data-testid="td-status">{status}</div>', unsafe_allow_html=True)
-    st.write(res.get("blocker") or ("All automated tests and detail checks passed." if res.get("verified") else ""))
+    if status == REVIEW and res.get("review_reasons"):
+        st.write("Technical checks passed, but these points need your eye before the PDF goes to a customer:")
+        st.markdown("\n".join(f"- {r}" for r in res["review_reasons"]))
+    else:
+        st.write(res.get("blocker") or ("All automated tests and detail checks passed." if res.get("verified") else ""))
 
     if res.get("pdf_bytes"):
         if res.get("verified"):
@@ -183,7 +187,7 @@ def show_result(res: dict, raw: bytes) -> None:
             st.caption(f"{res['pdf_name']} · {res.get('pdf_mb')} MB")
         else:
             st.download_button("Download review copy (not verified)", res["pdf_bytes"],
-                               file_name=res["pdf_name"].replace(".pdf", "_REVIEW_NOT_VERIFIED.pdf"),
+                               file_name=res["pdf_name"].replace(".pdf", "_NOT_VERIFIED.pdf"),
                                mime="application/pdf", key="dl_review")
             st.caption("Do not send this copy to a customer as final.")
     else:
@@ -275,8 +279,9 @@ def main() -> None:
         name = c2.text_input("Name", max_chars=60, placeholder="Cecilia")
         year = c3.text_input("Year / date", max_chars=20, placeholder="2026")
     with st.expander("4 · Fabric (automatic)"):
-        st.caption("Leave on automatic. Choose a fabric only to print an already verified chart for a different "
-                   "fabric; the finished size then changes and the result says so.")
+        st.caption("Leave on automatic. If you choose a fabric, the chart is sized for that fabric at the size "
+                   "you asked for. Your size never changes; if the details cannot be kept on that fabric you get "
+                   "SIZE-FIDELITY CONFLICT with alternatives.")
         fab_opts = ["Automatic (recommended)"] + [f.name for f in FABRICS]
         fab = st.selectbox("Fabric", fab_opts)
     display_fabric = None if fab == fab_opts[0] else fab
