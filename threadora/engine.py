@@ -209,6 +209,7 @@ class Selection:
     fabric_trials: list[dict] = field(default_factory=list)
     palette_trials: list[dict] = field(default_factory=list)
     alternative: str = ""
+    review_best: "Candidate | None" = None   # best failing candidate, for an owner review copy
 
 
 def select(rgb, opaque, src_white, feat, req_w_in, req_h_in, log=print,
@@ -230,6 +231,9 @@ def select(rgb, opaque, src_white, feat, req_w_in, req_h_in, log=print,
             for cov_t in STITCH_COVERAGE:
                 c = make_candidate(rgb, opaque, src_white, feat, plan, method, cov_t, k_probe, log)
                 sel.fabric_trials.append(c.summary())
+                if sel.review_best is None or (c.metrics["global"]["ssim_blurred"]
+                                               > sel.review_best.metrics["global"]["ssim_blurred"]):
+                    sel.review_best = c
                 if c.passed and (best is None or (c.needs_review, -c.metrics["global"]["ssim_blurred"])
                                  < (best.needs_review, -best.metrics["global"]["ssim_blurred"])):
                     best = c

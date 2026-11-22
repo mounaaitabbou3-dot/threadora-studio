@@ -89,7 +89,8 @@ def _write(priv: Path, audit: dict):
 
 
 def run_order(source_path, width: float, height: float, units: str, personalization: dict,
-              out_dir, display_fabric: str | None = None, log=print, run_tests: bool = True) -> dict:
+              out_dir, display_fabric: str | None = None, log=print, run_tests: bool = True,
+              review_copy: bool = False) -> dict:
     """display_fabric: optional fabric chosen by the owner (a FABRICS name). The stitch grid
     is then fitted to THAT fabric at the requested size; the size is never changed."""
     t0 = time.time()
@@ -147,8 +148,15 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
                                     f"Automatic fabric ({g.fabric.label}) at {req_w:g} × {req_h:g} in, or "
                                     f"{forced.label} at about {math.ceil(aw * 2) / 2:g} × "
                                     f"{math.ceil(ah * 2) / 2:g} in.")
-        _write(priv, audit)
-        return audit
+        if not (review_copy and sel.review_best is not None):
+            _write(priv, audit)
+            return audit
+        log("review copy requested: building the best failing candidate, marked NOT VERIFIED")
+        conflict_blocker = audit["blocker"]
+        sel.best = sel.review_best
+    else:
+        conflict_blocker = ""
+    is_review_copy = bool(conflict_blocker)
     best = sel.best
     cols, rows = best.plan.cols, best.plan.rows
     fab = best.plan.fabric
@@ -208,6 +216,7 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
     name = personalization.get("name") or "Pattern"
     title = " · ".join(v for v in (personalization.get("phrase"), name, personalization.get("year")) if v)
     meta = {
+        "review_banner": "REVIEW COPY — NOT VERIFIED" if is_review_copy else "",
         "project_name": title,
         "title": title,
         "subtitle": "Counted cross stitch pattern · full color + symbol charts",
@@ -249,7 +258,8 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
             f"finished size changes. This pattern was sized for {fab.label} at the requested size.",
         ],
     }
-    pdf_path = out_dir / f"THREADORA_{slug(name)}_{size_label(fin_w, fin_h)}.pdf"
+    pdf_path = out_dir / (f"THREADORA_{slug(name)}_{size_label(fin_w, fin_h)}"
+                          + ("_REVIEW_COPY" if is_review_copy else "") + ".pdf")
     builder = PatternPDF(pdf_path, meta, m, palette, src.rgba[y0:y1, x0:x1])
     nx = max(t.tc for t in builder.tiles) + 1
     ny = max(t.tr for t in builder.tiles) + 1
@@ -306,6 +316,13 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
                                                           else review + ["automated tests were not run"]))
     else:
         blocker = ""
+    if is_review_copy:
+        failed = [f"{'/'.join(t['expected']) or t['kind']}: read as {t['preview_ocr']!r}"
+                  for t in best.metrics["text_lines"] if not t["pass"]]
+        status = CONFLICT if status != FAILURE else status
+        blocker = conflict_blocker + " Review copy only. Failed lettering checks: " + (
+            "; ".join(failed) if failed else "none") + ". " + blocker
+        audit["review_copy"] = True
     audit["status"], audit["blocker"] = status, blocker
     audit["seconds"] = round(time.time() - t0, 1)
     _write(priv, audit)
