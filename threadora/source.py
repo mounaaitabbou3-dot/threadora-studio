@@ -46,10 +46,28 @@ def _border_background(rgb: np.ndarray, tol: float = 12.0) -> np.ndarray:
     med = np.median(border, axis=0)
     if np.mean(np.linalg.norm(border - med, axis=1) < tol) < 0.9:
         return np.zeros((h, w), bool)  # border is not uniform: no background removal
-    close = (np.linalg.norm(rgb.astype(float) - med, axis=2) < tol).astype(np.uint8)
+    close = np.linalg.norm(rgb.astype(float) - med, axis=2) < tol
+    # Edge evidence: the flood fill may not cross a drawn edge (outline, shading step), so
+    # white artwork outlined against a white background stays stitched.
+    g = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    edges = cv2.Canny(g, 20, 60) > 0
+    close = (close & ~edges).astype(np.uint8)
     n, lab = cv2.connectedComponents(close, connectivity=4)
     edge_labels = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))) - {0}
     bg = np.isin(lab, list(edge_labels))
+    # edge pixels lying between background pixels on both sides are background too (Canny lines
+    # inside a flat area are noise); edge pixels next to artwork are kept as artwork
+    # Canny marks a 1-2 px band on BOTH sides of every edge. Band pixels that have the background
+    # color and touch the background are background (no white fringe around the artwork); band
+    # pixels behind a dark outline never touch the background, so white artwork inside stays.
+    if bg.any():
+        cand = edges & ~bg & (np.linalg.norm(rgb.astype(float) - med, axis=2) < tol)
+        k4 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], np.uint8)
+        for _ in range(3):
+            grow = cand & (cv2.dilate(bg.astype(np.uint8), k4) > 0) & ~bg
+            if not grow.any():
+                break
+            bg |= grow
     return bg
 
 

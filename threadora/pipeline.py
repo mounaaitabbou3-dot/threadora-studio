@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image
 
 from . import __version__
+from . import report as quality_report
 from .convert import render_matrix
 from .dmc import DATA_SHA256, dataset_sha256, dmc_lab, load_dmc
 from .engine import select, text_cells
@@ -34,10 +35,49 @@ STATUSES = (VERIFIED, REVIEW, CONFLICT, FAILURE)
 SKEIN_STRAND_MM = 8000 * 6   # one 8 m skein = 48 m of single strand
 
 
-def skeins_for(count: int, spi: float, strands: int) -> int:
+def floss_meters(count: int, spi: float, strands: int) -> float:
+    """Meters of six-strand DMC floss used by `count` full cross stitches.
+    Per stitch: two diagonals (2 x sqrt2 cell) + two back-side travels (2 cells), +25% for
+    starts/ends, using `strands` single strands; +15% waste. One six-strand meter gives
+    six single-strand meters."""
     cell_mm = 25.4 / spi
-    per_stitch = cell_mm * (2 * math.sqrt(2) + 2) * 1.25 * strands
-    return max(1, math.ceil(count * per_stitch * 1.15 / SKEIN_STRAND_MM))
+    single_mm = count * cell_mm * (2 * math.sqrt(2) + 2) * 1.25 * strands * 1.15
+    return round(single_mm / 6 / 1000, 2)
+
+
+def skeins_for(count: int, spi: float, strands: int) -> int:
+    """8 m skeins needed (at least one per color)."""
+    return max(1, math.ceil(floss_meters(count, spi, strands) * 6 * 1000 / SKEIN_STRAND_MM - 1e-9))
+
+
+GENERIC_NAMES = {"image", "img", "original", "upload", "photo", "picture", "screenshot", "source", "design",
+                 "pattern", "file", "untitled", "download", "scan", "copy", "final", "new"}
+
+
+def design_title(personalization: dict, feat, source_name: str) -> str:
+    """A real design title: the personalization text; else lettering OCR read in the source;
+    else a meaningful file name; else a neutral title (never just "Pattern")."""
+    parts = [personalization.get(k, "").strip() for k in ("phrase", "name", "year")]
+    if any(parts):
+        return " · ".join(p for p in parts if p)
+    lines = []
+    for l in getattr(feat, "text_lines", []):
+        txt = re.sub(r"[^A-Za-z0-9&' -]+", " ", l.source_ocr or "").strip()
+        txt = re.sub(r"\s+", " ", txt)
+        raw = (l.source_ocr or "").strip()
+        words = txt.split()
+        clean = (len(raw) > 0 and sum(ch.isalnum() or ch.isspace() for ch in raw) / len(raw) >= 0.9
+                 and 0 < len(words) <= 6 and all(len(w) >= 2 or w in "&-" for w in words))
+        if sum(ch.isalpha() for ch in txt) >= 3 and (l.kind == "ocr_text" or clean):
+            lines.append(txt)
+    if lines:
+        return " ".join(lines)[:70]
+    stem = re.sub(r"[_\-.]+", " ", Path(source_name).stem).strip()
+    words = [w for w in stem.split() if w]
+    meaningful = [w for w in words if w.lower() not in GENERIC_NAMES and not re.fullmatch(r"[0-9a-fA-F]{6,}|\d+", w)]
+    if meaningful and sum(ch.isalpha() for ch in "".join(meaningful)) >= 3:
+        return " ".join(w if w.isupper() else w.capitalize() for w in meaningful)[:70]
+    return "Cross Stitch Design"
 
 
 def slug(s: str) -> str:
@@ -97,6 +137,8 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
     out_dir = Path(out_dir)
     priv = out_dir / "private"
     priv.mkdir(parents=True, exist_ok=True)
+    for old in out_dir.glob("THREADORA_*.pdf"):       # a re-run must not leave a stale customer PDF
+        old.unlink()
     req_w, req_h = to_inches(width, height, units)
     if req_w <= 0 or req_h <= 0:
         raise ValueError("requested size must be positive")
@@ -179,14 +221,15 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
     counts = [counts[i] for i in order]
     symbols = assign_symbols(len(pal_floss))
     palette = [{"code": f.code, "name": f.name, "rgb": list(f.rgb), "hex": f.hex, "symbol": s,
-                "count": c, "skeins": skeins_for(c, fab.stitches_per_inch, fab.strands)}
+                "count": c, "meters": floss_meters(c, fab.stitches_per_inch, fab.strands),
+                "skeins": skeins_for(c, fab.stitches_per_inch, fab.strands)}
                for f, s, c in zip(pal_floss, symbols, counts)]
     codes = [p["code"] for p in palette]
     master = {"format": "threadora-master-1", "rows": rows, "cols": cols,
               "source_sha256": src.sha256, "content_bbox": [x0, y0, x1, y1],
               "fabric": {"name": fab.name, "label": fab.label, "count": fab.count, "over": fab.over,
                          "stitches_per_inch": fab.stitches_per_inch},
-              "chart_resolution_fabric": fab.name,
+              "chart_resolution_fabric": fab.name, "strands": fab.strands,
               "physical_in": [round(fin_w, 4), round(fin_h, 4)],
               "physical_cm": [round(fin_w * CM_PER_IN, 3), round(fin_h * CM_PER_IN, 3)],
               "requested_in": [req_w, req_h],
@@ -213,8 +256,9 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
     cmp_img.paste(srcim, (0, 0)); cmp_img.paste(Image.fromarray(preview), (cols * 4 + 20, 0))
     cmp_img.save(priv / "comparison_source_vs_matrix.png")
     # ---- PDF
-    name = personalization.get("name") or "Pattern"
-    title = " · ".join(v for v in (personalization.get("phrase"), name, personalization.get("year")) if v)
+    title = design_title(personalization, feat, Path(source_path).name)
+    name = personalization.get("name") or title
+    margin_w, margin_h = max(0.0, req_w - fin_w), max(0.0, req_h - fin_h)
     meta = {
         "review_banner": "REVIEW COPY — NOT VERIFIED" if is_review_copy else "",
         "project_name": title,
@@ -223,7 +267,9 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
         "finished_size": f"{fin_w:.2f} × {fin_h:.2f} in ({fin_w * CM_PER_IN:.1f} × {fin_h * CM_PER_IN:.1f} cm)",
         "requested_size": (f"{width:g} × {height:g} {units}" +
                            (f" ({req_w:.2f} × {req_h:.2f} in)" if units != "in" else "") +
-                           " — design fitted inside, aspect ratio kept"),
+                           " maximum box — design fitted inside, aspect ratio kept"
+                           + (f"; unstitched margin {margin_w:.2f} in in width" if margin_w >= 0.01 else "")
+                           + (f"; unstitched margin {margin_h:.2f} in in height" if margin_h >= 0.01 else "")),
         "total_stitches": int((m >= 0).sum()),
         "fabric_label": f"{fab.label} ({fab.stitches_per_inch:g} stitches per inch)",
         "strands": fab.strands,
@@ -232,8 +278,9 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
             f"Fabric: {fab.label}, white or antique white. Cut at least "
             f"{fin_w + 6:.1f} × {fin_h + 6:.1f} in ({(fin_w + 6) * 2.54:.0f} × {(fin_h + 6) * 2.54:.0f} cm) "
             "to leave 3 in on every side.",
-            f"Threads: {len(palette)} DMC six-strand cotton floss colors (see legend; one skein each is enough "
-            "unless noted).",
+            f"Threads: {len(palette)} DMC six-strand cotton floss colors, about "
+            f"{sum(p['meters'] for p in palette):.0f} m in total; {sum(p['skeins'] for p in palette)} skeins "
+            "(8 m each). Amounts per color are calculated in the legend.",
             f"Needle: {fab.needle}. Hoop or scroll frame, embroidery scissors, good light"
             + (" and a magnifier." if fab.over == 1 and fab.count >= 25 else "."),
         ],
@@ -251,6 +298,10 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
             "for alignment only; stitch them from their own chart, never twice.",
             "Wash gently by hand, press face-down on a towel, and frame.",
         ],
+        "floss_note": (f"Floss is calculated per color from its stitch count: two diagonals plus back-side travel "
+                       f"per stitch on {fab.stitches_per_inch:g} stitches per inch, {fab.strands} strand(s), +25% "
+                       "for starts and ends, +15% waste. Meters are six-strand floss; skeins are 8 m. Buy one "
+                       "extra skein of colors you use a lot if you stitch loosely."),
         "size_table": size_table(cols, rows, fab),
         "size_caveats": [
             "Finished size = stitches ÷ stitches per inch. Real fabric counts vary slightly by brand and lot,",
@@ -279,7 +330,7 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
         "chosen": best.summary(), "fidelity_metrics": best.metrics,
         "design_audit": final_design,
         "chart_resolution_fabric": fab.name, "display_fabric": fab.name,
-        "fabric_practical": fab.practical, "finished_in": [fin_w, fin_h], "within_request": not size_errs,
+        "fabric_practical": fab.practical, "finished_in": [fin_w, fin_h], "requested_in": [req_w, req_h], "title": title, "within_request": not size_errs,
         "size_problems": size_errs,
         "alternatives_same_chart": alternatives, "pdf": str(pdf_path),
         "pdf_bytes": pdf_path.stat().st_size, "pdf_pages": chart_info["pages"],
@@ -288,7 +339,7 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
     })
     # ---- tests on the generated files
     _write(priv, audit)
-    test_ok = None
+    test_ok, test_log = None, None
     if run_tests:
         env_cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                    str(Path(__file__).resolve().parent.parent / "tests" / "test_order.py"),
@@ -298,6 +349,7 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
         (priv / "test_log.txt").write_text(r.stdout + "\n" + r.stderr)
         test_ok = r.returncode == 0
         audit["tests"] = {"returncode": r.returncode, "summary": r.stdout.strip().splitlines()[-1] if r.stdout else ""}
+        test_log = r.stdout
     fidelity_ok = bool(best.metrics["pass"]) and final_design["pass"]
     status = decide_status(test_ok, size_errs, fidelity_ok, fab.practical, review)
     if status == FAILURE:
@@ -325,6 +377,10 @@ def run_order(source_path, width: float, height: float, units: str, personalizat
         audit["review_copy"] = True
     audit["status"], audit["blocker"] = status, blocker
     audit["seconds"] = round(time.time() - t0, 1)
+    rep = quality_report.build(audit, test_log)
+    audit["quality_report"] = rep
+    (priv / "quality_report.json").write_text(json.dumps(rep, indent=2, default=str))
+    (priv / "quality_report.md").write_text(quality_report.to_markdown(rep))
     _write(priv, audit)
     log(f"STATUS: {status} {blocker}")
     return audit

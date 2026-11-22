@@ -11,7 +11,7 @@ from .convert import (METHODS, NO_STITCH, build_palette, cell_fields, dominant_a
 from .dmc import ciede2000_matrix, dmc_lab, load_dmc, nearest_dmc, to_lab
 from .features import Features, evaluate
 from .fidelity import (CellSource, audit as design_audit, palette_votes, repair as design_repair,
-                       repair_confetti)
+                       repair_confetti, repair_contours)
 from .sizing import FABRICS, GridPlan, fit_grid
 
 STITCH_COVERAGE = (0.5, 0.42)  # coverage thresholds tried (0.42 protects thin strokes)
@@ -174,27 +174,44 @@ def make_candidate(rgb, opaque, src_white, feat, plan, method, cov_t, k, log, co
         matrix = np.where(stitch, votes.argmax(-1), NO_STITCH).astype(np.int32)
     targets = [pr.dmc_idx.index(d) if d in pr.dmc_idx else -1 for d in letter_dmc]
     matrix = unify_lettering(matrix, feat, opaque.shape, pal_lab, targets)
-    # source-supported repair: color bleeding at boundaries, accidental pinholes
+    # source-supported repair: color bleeding at boundaries, accidental pinholes, lost details,
+    # unsupported confetti, broken source lines
     tcells = text_cells(feat, rows, cols)
     cs_full = CellSource(rgb, opaque, rows, cols, pal_lab, votes)
-    matrix, repaired = design_repair(matrix, cs_full, opened_mask, tcells)
-    matrix, removed, kept = remove_confetti(matrix, pal_lab, prot)
-    matrix, unsup_fixed = repair_confetti(matrix, cs_full, tcells)
+    plain, removed0, kept0 = remove_confetti(matrix, pal_lab, prot)
+    fixed, repaired = design_repair(matrix, cs_full, opened_mask, tcells)
+    fixed, removed, kept = remove_confetti(fixed, pal_lab, prot)
+    fixed, unsup_fixed = repair_confetti(fixed, cs_full, tcells)
     repaired["unsupported_confetti_recolored"] = unsup_fixed
-    used = sorted(set(np.unique(matrix[matrix >= 0]).tolist()))
-    remap = {u: i for i, u in enumerate(used)}
-    m2 = matrix.copy()
-    for u, i in remap.items():
-        m2[matrix == u] = i
-    dmc_idx = [pr.dmc_idx[u] for u in used]
-    pal_rgb = np.array([load_dmc()[i].rgb for i in dmc_idx], dtype=np.uint8)
-    metrics = evaluate(feat, src_white, opaque, m2, pal_rgb)
-    cs = CellSource(rgb, opaque, rows, cols, pal_lab[used], votes[..., used])
-    da = design_audit(m2, cs, opened_mask, tcells)
-    da["repairs"] = repaired
-    metrics["design"] = da
-    metrics["review"] = list(da["review"])
-    metrics["pass"] = bool(metrics["pass"] and da["pass"])
+    fixed, joined = repair_contours(fixed, cs_full, tcells)
+    repaired["contour_cells_joined"] = joined
+
+    def finish(mat):
+        used = sorted(set(np.unique(mat[mat >= 0]).tolist()))
+        m2 = np.full(mat.shape, NO_STITCH, np.int32)
+        for i, u in enumerate(used):
+            m2[mat == u] = i
+        dmc_idx = [pr.dmc_idx[u] for u in used]
+        pal_rgb = np.array([load_dmc()[i].rgb for i in dmc_idx], dtype=np.uint8)
+        metrics = evaluate(feat, src_white, opaque, m2, pal_rgb)
+        cs = CellSource(rgb, opaque, rows, cols, pal_lab[used], votes[..., used])
+        da = design_audit(m2, cs, opened_mask, tcells)
+        metrics["design"] = da
+        metrics["review"] = list(da["review"])
+        metrics["critical_pass"] = bool(metrics["pass"])          # lettering, ornaments, blobs
+        metrics["pass"] = bool(metrics["pass"] and da["pass"])
+        return m2, dmc_idx, metrics
+
+    m2, dmc_idx, metrics = finish(fixed)
+    if not metrics["critical_pass"]:
+        # never accept a repair that damages a critical region (lettering, ornaments, eyes):
+        # if the unrepaired matrix keeps them, use it instead
+        m_plain, idx_plain, met_plain = finish(plain)
+        if met_plain["critical_pass"]:
+            m2, dmc_idx, metrics = m_plain, idx_plain, met_plain
+            removed, kept = removed0, kept0
+            repaired = {"reverted": "repairs damaged a critical region; unrepaired matrix kept"}
+    metrics["design"]["repairs"] = repaired
     c = Candidate(plan, method, cov_t, k, dmc_idx, m2, removed, kept, metrics, pr.mean_de)
     c.opened_mask = opened_mask
     log(f"  cand {plan.fabric.name} {cols}x{rows} {method} cov={cov_t} k={k} -> {c.n_colors} colors "

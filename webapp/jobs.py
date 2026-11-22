@@ -73,7 +73,7 @@ def summarize(audit: dict, order_dir: Path) -> dict:
     out = {k: audit.get(k) for k in ("status", "blocker", "pdf_pages", "dmc_colors", "display_fabric",
                                      "chart_resolution_fabric", "fabric_practical", "within_request",
                                      "alternatives_same_chart", "tests", "seconds",
-                                     "review_reasons", "size_problems")}
+                                     "review_reasons", "size_problems", "title", "quality_report")}
     pdf = audit.get("pdf")
     out["pdf_name"] = Path(pdf).name if pdf and Path(pdf).exists() else None
     out["pdf_mb"] = round(audit["pdf_bytes"] / 1e6, 2) if audit.get("pdf_bytes") else None
@@ -86,7 +86,7 @@ def summarize(audit: dict, order_dir: Path) -> dict:
         out["finished_in"] = m["physical_in"]
         out["finished_cm"] = m["physical_cm"]
         out["requested_in"] = m["requested_in"]
-        out["palette"] = [{k: p[k] for k in ("code", "name", "hex", "symbol", "count", "skeins")}
+        out["palette"] = [{k: p.get(k) for k in ("code", "name", "hex", "symbol", "count", "meters", "skeins")}
                           for p in m["palette"]]
     out["has_preview"] = (order_dir / "private" / "stitched_preview_from_matrix.png").exists()
     out["has_comparison"] = (order_dir / "private" / "comparison_source_vs_matrix.png").exists()

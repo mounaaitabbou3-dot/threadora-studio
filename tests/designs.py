@@ -166,7 +166,26 @@ def opaque_white_background():
     return im
 
 
+def portrait():
+    """Simple face: skin shading, eyes with white catchlights, lips, hair outline."""
+    im, d = _canvas(420, 500)
+    hair, skin, shade = (60, 35, 20, 255), (235, 190, 160, 255), (205, 150, 120, 255)
+    d.ellipse([70, 30, 350, 360], fill=hair)                                                   # hair
+    d.ellipse([105, 80, 315, 380], fill=skin, outline=(120, 70, 50, 255), width=4)              # face
+    d.ellipse([110, 250, 170, 330], fill=shade); d.ellipse([250, 250, 310, 330], fill=shade)    # cheeks
+    for x in (150, 240):
+        d.ellipse([x, 190, x + 40, 220], fill=(255, 255, 255, 255), outline=(40, 30, 30, 255), width=3)
+        d.ellipse([x + 10, 192, x + 30, 218], fill=(70, 110, 60, 255))                          # iris
+        d.ellipse([x + 15, 197, x + 25, 207], fill=(10, 10, 10, 255))
+        d.ellipse([x + 22, 195, x + 28, 201], fill=(255, 255, 255, 255))                        # catchlight
+    d.line([(210, 230), (200, 280), (215, 285)], fill=(150, 90, 70, 255), width=4)            # nose
+    d.ellipse([170, 305, 250, 335], fill=(190, 60, 70, 255))                                    # lips
+    d.rectangle([140, 390, 280, 500], fill=(40, 80, 150, 255))                                  # collar
+    return im
+
+
 DESIGNS = {
+    "portrait": (portrait, {}),
     "memorial_lettering": (memorial_lettering, {"phrase": "In Loving Memory", "name": "Rose", "year": "2026"}),
     "christmas_ornament": (christmas_ornament, {}),
     "teddy_bear": (teddy_bear, {}),

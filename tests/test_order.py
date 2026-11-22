@@ -79,12 +79,12 @@ def test_pages_order_and_titles(pdf_path, chart_info):
     doc = pymupdf.open(pdf_path)
     assert doc.page_count == chart_info["pages"]
     t = chart_info["titles"]
-    assert t[:4] == ["Pattern cover", "Materials, stitching guide and sizes", "Thread legend (DMC)",
-                     "Stitched result overview — reconstructed from the chart"]
-    assert t[4:] == [f"Chart {x['id']}" for x in chart_info["tiles"]]
+    assert t[:5] == ["Pattern cover", "Materials, stitching guide and sizes", "Thread legend (DMC)",
+                     "Stitched result overview — reconstructed from the chart", "Chart navigation"]
+    assert t[5:] == [f"Chart {x['id']}" for x in chart_info["tiles"]]
     for i, title in enumerate(t):
         assert title in doc[i].get_text(), f"page {i + 1} missing title {title}"
-    assert [x["page"] for x in chart_info["tiles"]] == list(range(5, 5 + len(chart_info["tiles"])))
+    assert [x["page"] for x in chart_info["tiles"]] == list(range(6, 6 + len(chart_info["tiles"])))
 
 
 def test_no_label_collisions_and_labels_correct(chart_info, pdf_path):
@@ -251,3 +251,32 @@ def test_text_does_not_overlap_on_text_pages(pdf_path, chart_info):
                     continue
                 small = min(boxes[a].get_area(), boxes[b].get_area())
                 assert inter.get_area() <= 0.25 * small, f"page {i + 1}: text overlaps at {inter}"
+
+
+def test_overview_is_clean_and_navigation_complete(pdf_path, chart_info):
+    """The stitched-result page shows only the matrix (no chart IDs or navigation lines);
+    the separate navigation page names every chart and its page."""
+    import pymupdf
+    doc = pymupdf.open(pdf_path)
+    ov = doc[3].get_text()
+    ids = [t["id"] for t in chart_info["tiles"]]
+    if len(ids) > 1:
+        assert not any(f"\n{i}\n" in f"\n{ov}\n" for i in ids), "chart labels drawn on the clean preview"
+    assert len(doc[3].get_drawings()) == 0 or all(d.get("dashes") in (None, "[] 0") for d in doc[3].get_drawings())
+    nav = doc[4].get_text()
+    for t in chart_info["tiles"]:
+        assert t["id"] in nav
+    if len(ids) <= 60:
+        for t in chart_info["tiles"]:
+            assert str(t["page"]) in nav
+
+
+def test_floss_amounts_calculated(master, pdf_path):
+    """Floss per color is calculated from its stitch count (not one skein each by default)."""
+    import pymupdf
+    from threadora.pipeline import floss_meters, skeins_for
+    spi = master["fabric"]["stitches_per_inch"]
+    for p in master["palette"]:
+        assert p["meters"] == pytest.approx(floss_meters(p["count"], spi, master["strands"]), abs=0.05)
+        assert p["skeins"] == skeins_for(p["count"], spi, master["strands"])
+    assert "Floss (m)" in pymupdf.open(pdf_path)[2].get_text()

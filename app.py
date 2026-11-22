@@ -170,15 +170,45 @@ def generate(raw: bytes, filename: str, w: float, h: float, units: str, pers: di
     return res
 
 
+GATE_ICON = {"PASS": "✅", "REVIEW": "⚠️", "FAIL": "❌", "NOT TESTED": "◻️"}
+
+
+def show_quality_report(rep: dict | None) -> None:
+    """Five-gate quality report, shown before the download button. Measured values and the
+    tests that actually ran on this order; deliberately no overall score."""
+    if not rep:
+        return
+    st.markdown("##### Quality report")
+    st.caption(f"{rep['tests_executed']} automated tests ran on this order, {rep['tests_passed']} passed. "
+               "No overall score is given: each gate shows its own measurements.")
+    cols = st.columns(len(rep["gates"]))
+    for col, gate in zip(cols, rep["gates"].values()):
+        col.markdown(f"**{GATE_ICON.get(gate['result'], '')} {gate['label']}**  \n{gate['result']}")
+    with st.expander("Measured results, risks and tests"):
+        for gate in rep["gates"].values():
+            st.markdown(f"**{gate['label']} — {gate['result']}**  \n{gate['checks']}")
+            lines = [f"- {k.replace('_', ' ')}: {v}" for k, v in gate["measured"].items() if v is not None]
+            if gate["tests"]:
+                ok = sum(1 for s in gate["tests"].values() if s == "PASSED")
+                lines.append(f"- tests: {ok} of {len(gate['tests'])} passed")
+            lines += [f"- ⚠ {r}" for r in gate["risks"]]
+            if lines:
+                st.markdown("\n".join(lines))
+
+
 def show_result(res: dict, raw: bytes) -> None:
     status = res.get("status") or FAILURE
     cls = "td-ok" if status == VERIFIED else "td-warn" if status in (CONFLICT, REVIEW) else "td-bad"
     st.markdown(f'<div class="td-status {cls}" data-testid="td-status">{status}</div>', unsafe_allow_html=True)
+    if res.get("title"):
+        st.markdown(f"**{res['title']}**")
     if status == REVIEW and res.get("review_reasons"):
         st.write("Technical checks passed, but these points need your eye before the PDF goes to a customer:")
         st.markdown("\n".join(f"- {r}" for r in res["review_reasons"]))
     else:
         st.write(res.get("blocker") or ("All automated tests and detail checks passed." if res.get("verified") else ""))
+
+    show_quality_report(res.get("quality_report"))
 
     if res.get("pdf_bytes"):
         if res.get("verified"):
@@ -196,9 +226,9 @@ def show_result(res: dict, raw: bytes) -> None:
     if res.get("stitches"):
         req = res["request"]
         c = st.columns(4)
-        c[0].metric("Requested", f"{req['width']:g} × {req['height']:g} {req['units']}")
+        c[0].metric("B · Maximum box requested", f"{req['width']:g} × {req['height']:g} {req['units']}")
         fi, fc = res["finished_in"], res["finished_cm"]
-        c[1].metric("Finished", f"{fi[0]:.2f} × {fi[1]:.2f} in", f"{fc[0]:.1f} × {fc[1]:.1f} cm", delta_color="off")
+        c[1].metric("A · Stitched design (exact)", f"{fi[0]:.2f} × {fi[1]:.2f} in", f"{fc[0]:.1f} × {fc[1]:.1f} cm", delta_color="off")
         c[2].metric("Stitch grid", f"{res['stitches']['cols']} × {res['stitches']['rows']}",
                     f"{res['stitches']['total']:,} stitches", delta_color="off")
         c[3].metric("DMC colors", res.get("dmc_colors"))
@@ -228,9 +258,9 @@ def show_result(res: dict, raw: bytes) -> None:
             ink = "#000" if 0.299 * r + 0.587 * g + 0.114 * b > 140 else "#fff"
             rows.append(f'<tr><td><span class="td-sw" style="background:{p["hex"]};color:{ink}">{p["symbol"]}</span></td>'
                         f'<td>{p["code"]}</td><td>{p["name"]}</td><td class="n">{p["count"]:,}</td>'
-                        f'<td class="n">{p["skeins"]}</td></tr>')
+                        f'<td class="n">{p.get("meters") or ""}</td><td class="n">{p["skeins"]}</td></tr>')
         st.markdown('<table class="td-legend"><tr><th>Symbol</th><th>DMC</th><th>Name</th><th class="n">Stitches</th>'
-                    '<th class="n">Skeins</th></tr>' + "".join(rows) + "</table>", unsafe_allow_html=True)
+                    '<th class="n">Floss (m)</th><th class="n">Skeins</th></tr>' + "".join(rows) + "</table>", unsafe_allow_html=True)
 
     if res.get("bundle_zip"):
         st.download_button("Download private audit files (ZIP)", res["bundle_zip"], file_name=res["bundle_name"],

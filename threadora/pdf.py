@@ -180,7 +180,7 @@ class PatternPDF:
         c.drawCentredString(PAGE_W / 2, y - 16, "ORIGINAL ARTWORK — reference image only, not the stitched result")
         c.setFont("TD-Sans", 7.5)
         c.drawCentredString(PAGE_W / 2, y - 27, "The stitched result reconstructed from the chart is shown on the overview page.")
-        rows = [("Finished design size", mt["finished_size"]),
+        rows = [("Stitched design size", mt["finished_size"] + " — exact, from the stitch count"),
                 ("Requested size", mt["requested_size"]),
                 ("Stitch count", f"{self.cols} wide × {self.rows} high ({self.cols * self.rows:,} cells, "
                                  f"{mt['total_stitches']:,} full cross stitches)"),
@@ -235,7 +235,8 @@ class PatternPDF:
         cs = 16
         c.setFont("TD-Bold", 8.5)
         heads = [(MARGIN, "Symbol"), (MARGIN + 50, "DMC"), (MARGIN + 100, "Color name"),
-                 (MARGIN + 300, "Stitches"), (MARGIN + 370, "Skeins"), (MARGIN + 420, "Swatch")]
+                 (MARGIN + 290, "Stitches"), (MARGIN + 345, "Floss (m)"), (MARGIN + 400, "Skeins"),
+                 (MARGIN + 440, "Swatch")]
         for x, t in heads:
             c.drawString(x, y, t)
         y -= 8
@@ -251,58 +252,110 @@ class PatternPDF:
             c.drawString(MARGIN + 50, y + 4.5, p["code"])
             c.setFont("TD-Sans", 9)
             c.drawString(MARGIN + 100, y + 4.5, p["name"])
-            c.drawRightString(MARGIN + 340, y + 4.5, f"{p['count']:,}")
-            c.drawRightString(MARGIN + 395, y + 4.5, str(p["skeins"]))
-            c.setFillColor(_rgb(bg)); c.rect(MARGIN + 420, y, 90, cs, fill=1, stroke=1)
+            c.drawRightString(MARGIN + 330, y + 4.5, f"{p['count']:,}")
+            c.drawRightString(MARGIN + 385, y + 4.5, f"{p['meters']:.1f}" if "meters" in p else "—")
+            c.drawRightString(MARGIN + 428, y + 4.5, str(p["skeins"]))
+            c.setFillColor(_rgb(bg)); c.rect(MARGIN + 440, y, 70, cs, fill=1, stroke=1)
             c.setFillColor(black)
         y -= 20
         c.setFont("TD-Bold", 9)
         tot = sum(p["count"] for p in self.pal)
         c.drawString(MARGIN + 100, y, "Total full cross stitches")
-        c.drawRightString(MARGIN + 340, y, f"{tot:,}")
+        c.drawRightString(MARGIN + 330, y, f"{tot:,}")
+        if all("meters" in p for p in self.pal):
+            c.drawRightString(MARGIN + 385, y, f"{sum(p['meters'] for p in self.pal):.1f}")
+            c.drawRightString(MARGIN + 428, y, str(sum(p["skeins"] for p in self.pal)))
         y -= 14
+        if self.meta.get("floss_note"):
+            c.setFont("TD-Sans", 7.5)
+            for ln in wrap(self.meta["floss_note"], "TD-Sans", 7.5, PAGE_W - 2 * MARGIN):
+                c.drawString(MARGIN, y, ln)
+                y -= 10
         c.setFont("TD-Sans", 7.5)
         c.drawString(MARGIN, y, "Blank chart cells = no stitch (fabric shows). Screen and print colors are approximate; "
                                 "always stitch by DMC number.")
         y -= 10
         c.drawString(MARGIN, y, "Color data: craft-color-codes by MakeBead (makebead.com), CC BY 4.0.")
 
-    def overview(self, c):
-        self._header(c, "Stitched result overview — reconstructed from the chart")
+    def _matrix_image(self, k: int, fade: float = 0.0) -> np.ndarray:
         pal_rgb = np.array([p["rgb"] for p in self.pal], np.uint8)
-        k = 6
         img = np.full((self.rows, self.cols, 3), 255, np.uint8)
         st = self.m >= 0
         img[st] = pal_rgb[self.m[st]]
-        img = np.repeat(np.repeat(img, k, 0), k, 1)
+        if fade:
+            img = (255 - (255 - img.astype(float)) * (1 - fade)).astype(np.uint8)
+        return np.repeat(np.repeat(img, k, 0), k, 1)
+
+    def overview(self, c):
+        """Clean stitched-result preview: only the master matrix, no labels or chart lines."""
+        self._header(c, "Stitched result overview — reconstructed from the chart")
         avail_w = PAGE_W - 2 * MARGIN
         avail_h = PAGE_H - 2 * MARGIN - HEADER_H - FOOTER_H - 40
         s = min(avail_w / self.cols, avail_h / self.rows)
         w, h = self.cols * s, self.rows * s
         x0 = (PAGE_W - w) / 2
         ytop = PAGE_H - MARGIN - HEADER_H - 8
-        c.drawImage(self._img(img), x0, ytop - h, w, h)
-        c.setStrokeColor(Color(0.1, 0.1, 0.1)); c.setLineWidth(1.4)
-        c.rect(x0, ytop - h, w, h)
-        c.setLineWidth(1.0); c.setDash(4, 2)
-        for t in self.tiles:
-            tx, ty = x0 + t.c0 * s, ytop - t.r1 * s
-            c.rect(tx, ty, (t.c1 - t.c0) * s, (t.r1 - t.r0) * s)
-        c.setDash()
-        for t in self.tiles:
-            cx = x0 + (t.c0 + t.c1) / 2 * s
-            cy = ytop - (t.r0 + t.r1) / 2 * s
-            c.setFillColor(Color(1, 1, 1, alpha=0.85))
-            c.roundRect(cx - 17, cy - 9, 34, 18, 4, stroke=0, fill=1)
-            c.setFillColor(black); c.setFont("TD-Bold", 10)
-            c.drawCentredString(cx, cy - 3.5, t.id)
+        c.drawImage(self._img(self._matrix_image(6)), x0, ytop - h, w, h)
         c.setFont("TD-Sans", 7.5)
         c.drawString(MARGIN, ytop - h - 14,
                      "Every cell above comes from the master stitch matrix (DMC color per stitch, white = no stitch). "
                      "It is not the original artwork.")
-        c.drawString(MARGIN, ytop - h - 24,
-                     "Chart navigation: dashed boxes are chart pages (letter = chart row, number = chart column); "
-                     "each chart page follows in this order.")
+        c.drawString(MARGIN, ytop - h - 24, "Chart pages and their order are shown on the next page (chart navigation).")
+
+    def navigation(self, c):
+        """Separate chart navigation: which chart page holds which columns and rows."""
+        self._header(c, "Chart navigation", f"{len(self.tiles)} chart pages")
+        avail_w = PAGE_W - 2 * MARGIN
+        avail_h = (PAGE_H - 2 * MARGIN - HEADER_H - FOOTER_H) * 0.55
+        s = min(avail_w / self.cols, avail_h / self.rows)
+        w, h = self.cols * s, self.rows * s
+        x0 = (PAGE_W - w) / 2
+        ytop = PAGE_H - MARGIN - HEADER_H - 8
+        c.drawImage(self._img(self._matrix_image(4, fade=0.55)), x0, ytop - h, w, h)
+        c.setStrokeColor(Color(0.1, 0.1, 0.1)); c.setLineWidth(1.4)
+        c.rect(x0, ytop - h, w, h)
+        c.setLineWidth(1.0); c.setDash(4, 2)
+        for t in self.tiles:
+            c.rect(x0 + t.c0 * s, ytop - t.r1 * s, (t.c1 - t.c0) * s, (t.r1 - t.r0) * s)
+        c.setDash()
+        for t in self.tiles:
+            cx = x0 + (t.c0 + t.c1) / 2 * s
+            cy = ytop - (t.r0 + t.r1) / 2 * s
+            c.setFillColor(Color(1, 1, 1, alpha=0.9))
+            c.roundRect(cx - 17, cy - 9, 34, 18, 4, stroke=0, fill=1)
+            c.setFillColor(black); c.setFont("TD-Bold", 10)
+            c.drawCentredString(cx, cy - 3.5, t.id)
+        y = ytop - h - 22
+        cols_x = (0, 32, 62, 122)          # Chart, Page, Columns, Rows within one block
+        block_w = (PAGE_W - 2 * MARGIN) / 3
+        lh = 9.5
+        per_col = max(1, int((y - MARGIN - FOOTER_H - 14) // lh) - 1)
+        first_chart_page = 6
+        if len(self.tiles) > 3 * per_col:
+            last = first_chart_page + len(self.tiles) - 1
+            c.setFont("TD-Sans", 8.5)
+            c.drawString(MARGIN, y, f"Chart pages {first_chart_page}–{last} follow in reading order: chart row A left "
+                                    "to right, then row B, and so on. Each page header names its columns and rows.")
+            self._nav_footer(c)
+            return
+        for blk in range(min(3, math.ceil(len(self.tiles) / per_col))):    # only blocks that hold charts
+            c.setFont("TD-Bold", 7.5)
+            for x, txt in zip(cols_x, ("Chart", "Page", "Columns", "Rows")):
+                c.drawString(MARGIN + blk * block_w + x, y, txt)
+        c.setFont("TD-Sans", 7.5)
+        for i, t in enumerate(self.tiles):
+            blk, row = divmod(i, per_col)
+            bx, yy = MARGIN + blk * block_w, y - lh * (row + 1)
+            c.drawString(bx + cols_x[0], yy, t.id)
+            c.drawString(bx + cols_x[1], yy, str(first_chart_page + i))
+            c.drawString(bx + cols_x[2], yy, f"{t.c0 + 1}–{t.c1}")
+            c.drawString(bx + cols_x[3], yy, f"{t.r0 + 1}–{t.r1}")
+        self._nav_footer(c)
+
+    def _nav_footer(self, c):
+        c.setFont("TD-Sans", 7.5)
+        c.drawString(MARGIN, MARGIN + FOOTER_H, "Dashed boxes = chart pages (letter = chart row, number = chart column). "
+                                                "Overlap cells on each chart are references only; stitch them once.")
 
     def chart(self, c, t: Tile, page_no: int):
         nx = max(tt.tc for tt in self.tiles) + 1
@@ -413,9 +466,9 @@ class PatternPDF:
         c.setTitle(f"THREADORA Cross Stitch — {self.meta['project_name']}")
         c.setAuthor("THREADORA")
         c.setSubject("Counted cross stitch pattern")
-        total = 4 + len(self.tiles)
+        total = 5 + len(self.tiles)
         n = 1
-        for fn in (self.cover, self.materials, self.legend, self.overview):
+        for fn in (self.cover, self.materials, self.legend, self.overview, self.navigation):
             fn(c); self._footer(c, n, total); c.showPage(); n += 1
         for t in self.tiles:
             self.chart(c, t, n); self._footer(c, n, total); c.showPage(); n += 1
